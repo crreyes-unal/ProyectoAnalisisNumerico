@@ -1,15 +1,27 @@
-Código para la red neuronal y para el entrenamiento
+# Red neuronal y entrenamiento en Julia
 
+Este documento muestra la implementación y el entrenamiento de un modelo de difusión 1D basado en una arquitectura **WaveNet** pequeña utilizando `Flux.jl`.
+
+## 0. Dependencias y configuración inicial
+
+Importamos las librerías necesarias y detectamos si hay soporte para GPU mediante CUDA.
+
+```julia
 using Flux
 using CUDA
 using Statistics
 using Printf
 using Optimisers
 
-# --- 1. Datos y esquema de ruido ---
 device = CUDA.functional() ? gpu : cpu
 println("Dispositivo: ", CUDA.functional() ? "CUDA (GPU)" : "CPU")
+```
 
+## 1. Datos y esquema de ruido
+
+Definimos los parámetros de la señal de audio sintética (un tono puro de 440 Hz) y el calendario lineal de varianza ($\beta$, $\alpha$ y $\bar{\alpha}$) para el proceso de difusión.
+
+```julia
 const FS = 16000
 const F0 = 440f0
 const LARGO = 2048
@@ -24,13 +36,18 @@ function lote_pitidos(B, largo=LARGO)
 end
 
 const T_pasos = 200
-# Equivalent a torch.linspace
+# Equivalente a torch.linspace
 const beta = collect(range(1f-4, 5f-2, length=T_pasos)) |> device
 const alfa = 1f0 .- beta
 const abar = cumprod(alfa, dims=1)
 @printf("abar_T = %.4f   (con beta_fin=0.05)\n", abar[end])
+```
 
-# --- 2. La red (WaveNet pequeña) ---
+## 2. Arquitectura de la red (`WaveNetMini`)
+
+Construimos el *embedding* sinusoidal para el paso temporal $t$, los bloques residuales con convoluciones dilatadas y activación *gated*, y la estructura principal de la red.
+
+```julia
 function emb_tiempo(t, dim=64)
     mitad = dim ÷ 2
     frec = exp.(-log(10000f0) .* Float32.(0:mitad-1) ./ (mitad - 1)) |> device
@@ -96,14 +113,25 @@ function (m::WaveNetMini)(x, t)
     end
     return m.salida(h)
 end
+```
 
+### Verificación del campo receptivo
+
+Comprobamos cuántas muestras abarca el campo receptivo del modelo según el número de capas dilatadas.
+
+```julia
 println("Periodo del pitido: ", round(FS / F0, digits=1), " muestras")
 for capas in (3, 8)
     modelo_tmp = WaveNetMini(capas=capas)
-    println("capas=$capas: campo receptivo = $(modelo_tmp.campo_receptivo) muestras")
+    println("capas=capas: campo receptivo = (modelo_tmp.campo_receptivo) muestras")
 end
+```
 
-# --- 3. Entrenamiento (lotes, muchos pasos) ---
+## 3. Entrenamiento
+
+Entrenamos la red prediciendo el ruido gaussiano añadido $\epsilon$, usando recorte de gradientes (`ClipNorm`), optimizador `Adam` y decaimiento coseno manual para la tasa de aprendizaje.
+
+```julia
 function entrenar(; capas=8, C=32, pasos=8000, B=32, lr_inicial=5f-4)
     modelo = WaveNetMini(C=C, capas=capas) |> device
     
@@ -112,8 +140,8 @@ function entrenar(; capas=8, C=32, pasos=8000, B=32, lr_inicial=5f-4)
     opt_state = Flux.setup(reglas_opt, modelo)
     
     hist = Float32[]
-    println("Entrenando: capas=$capas, C=$C, campo receptivo=$(modelo.campo_receptivo), " *
-            "parámetros=$(sum(length, Flux.params(modelo)))")
+    println("Entrenando: capas=\$capas, C=C, campo receptivo=(modelo.campo_receptivo), " *
+            "parámetros=\$(sum(length, Flux.params(modelo)))")
     
     for paso in 1:pasos
         x0 = lote_pitidos(B)
@@ -145,8 +173,13 @@ function entrenar(; capas=8, C=32, pasos=8000, B=32, lr_inicial=5f-4)
 end
 
 modelo8, hist8 = entrenar(capas=8)
+```
 
-# --- 4. Evaluación de la pérdida de predicción en función de t ---
+## 4. Evaluación de la pérdida por paso temporal $t$
+
+Comparamos el error cuadrático medio (MSE) de la red entrenada frente a una línea base trivial en distintos instantes de ruido.
+
+```julia
 function perdida_por_t(modelo; ts=(5, 25, 50, 100, 150, 200), B=64)
     modelo_eval = Flux.testmode!(modelo) # Fija parámetros como equivalente a modelo.eval()
     println("  t | pérdida de la red | predicción trivial")
@@ -156,7 +189,7 @@ function perdida_por_t(modelo; ts=(5, 25, 50, 100, 150, 200), B=64)
         eps = randn(Float32, size(x0)...) |> device
         
         a = abar[tv]
-        xt = sqrt(a) .* x0 .+ sqrt(1f0 - a) .* eps
+        xt = sqrt(a) .* x0 .+ sqrt(1f0 .- a) .* eps
         
         pred = modelo_eval(xt, t)
         mse = Flux.mse(pred, eps)
@@ -167,3 +200,5 @@ function perdida_por_t(modelo; ts=(5, 25, 50, 100, 150, 200), B=64)
 end
 
 perdida_por_t(modelo8)
+```
+
