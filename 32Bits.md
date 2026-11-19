@@ -1,8 +1,8 @@
-# Red neuronal y entrenamiento en Julia
+### Red neuronal y entrenamiento en Julia
 
 Este documento muestra la implementación y el entrenamiento de un modelo de difusión 1D basado en una arquitectura **WaveNet** pequeña utilizando `Flux.jl`.
 
-## 0. Dependencias y configuración inicial
+### 0. Dependencias y configuración inicial
 
 Importamos las librerías necesarias y detectamos si hay soporte para GPU mediante CUDA.
 
@@ -17,7 +17,7 @@ device = CUDA.functional() ? gpu : cpu
 println("Dispositivo: ", CUDA.functional() ? "CUDA (GPU)" : "CPU")
 ```
 
-## 1. Datos y esquema de ruido
+### 1. Datos y esquema de ruido
 
 Definimos los parámetros de la señal de audio sintética (un tono puro de 440 Hz) y el calendario lineal de varianza ($\beta$, $\alpha$ y $\bar{\alpha}$) para el proceso de difusión.
 
@@ -43,7 +43,7 @@ const abar = cumprod(alfa, dims=1)
 @printf("abar_T = %.4f   (con beta_fin=0.05)\n", abar[end])
 ```
 
-## 2. Arquitectura de la red (`WaveNetMini`)
+### 2. Arquitectura de la red (`WaveNetMini`)
 
 Construimos el *embedding* sinusoidal para el paso temporal $t$, los bloques residuales con convoluciones dilatadas y activación *gated*, y la estructura principal de la red.
 
@@ -115,7 +115,7 @@ function (m::WaveNetMini)(x, t)
 end
 ```
 
-### Verificación del campo receptivo
+#### Verificación del campo receptivo
 
 Comprobamos cuántas muestras abarca el campo receptivo del modelo según el número de capas dilatadas.
 
@@ -127,7 +127,7 @@ for capas in (3, 8)
 end
 ```
 
-## 3. Entrenamiento
+### 3. Entrenamiento
 
 Entrenamos la red prediciendo el ruido gaussiano añadido $\epsilon$, usando recorte de gradientes (`ClipNorm`), optimizador `Adam` y decaimiento coseno manual para la tasa de aprendizaje.
 
@@ -175,7 +175,7 @@ end
 modelo8, hist8 = entrenar(capas=8)
 ```
 
-## 4. Evaluación de la pérdida por paso temporal $t$
+### 4. Evaluación de la pérdida por paso temporal $t$
 
 Comparamos el error cuadrático medio (MSE) de la red entrenada frente a una línea base trivial en distintos instantes de ruido.
 
